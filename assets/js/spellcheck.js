@@ -5,6 +5,8 @@
  */
 import { KINDS, extractFields, words, fieldEdits, applyEdits, decodeXml, encodeXml, gridName } from './gridtext.mjs';
 import { normalise } from './spell.mjs';
+import { parseGrid, parseStyles, wordListCells } from './gridmodel.mjs';
+import { renderPage, fitCaptions } from './gridview.js';
 
 const C = window.GridCore;
 
@@ -145,14 +147,23 @@ let state = null;
 let runId = 0;
 let speller = null;
 
+/** Forgets the current grid set and frees its preview pictures. */
+function clearState() {
+  if (state) for (const url of state.pictures.values()) if (url) URL.revokeObjectURL(url);
+  state = null;
+}
+
 /*
  * state = {
  *   file, zip,
  *   pages:   [{ name, entry, xml, editable, fields }],
- *   flagged: [{ key, word, short, suggestions, occurrences, status, replacement, row }],
+ *   flagged: [{ key, word, short, suggestions, occurrences, row }],
+ *   byPage:  Map page index → occurrences on that page,
  *   pageNames: [{ key, word, pages }],
+ *   styles, entriesByName, pictures (Map name → blob URL for previews),
  * }
- * occurrence = { page, field, start, end, word, include, replacement }
+ * occurrence = { page, field, start, end, word, flag, include, replacement }
+ * Pages also get `model` and `fieldCells` once they are previewed.
  */
 
 const yieldToBrowser = () => new Promise((r) => setTimeout(r, 0));
@@ -161,7 +172,7 @@ async function handleFile(file) {
   if (!file) return;
   if (state && hasUnsavedChanges() && !confirm('You have corrections you have not downloaded. Check a different grid set anyway?')) return;
   const id = ++runId;
-  state = null;
+  clearState();
 
   if (!/\.gridsetx?$/i.test(file.name)) {
     showError('This is not a grid set', `"${file.name}" is not a grid set. Please choose a file that ends in .gridset.`);
@@ -234,7 +245,9 @@ async function handleFile(file) {
       const counts = new Map();
       for (const o of occurrences) counts.set(o.word, (counts.get(o.word) || 0) + 1);
       const word = [...counts].sort((a, b) => b[1] - a[1])[0][0];
-      return { key, word, short: [...key].length <= 3, suggestions: [], occurrences, status: 'open', replacement: null, row: null };
+      const f = { key, word, short: [...key].length <= 3, suggestions: [], occurrences, row: null };
+      for (const o of occurrences) o.flag = f;
+      return f;
     });
     flagged.sort((a, b) => b.occurrences.length - a.occurrences.length || a.key.localeCompare(b.key));
 
@@ -253,7 +266,22 @@ async function handleFile(file) {
     }));
 
     // Words accepted on an earlier visit are not shown at all.
-    state = { file, zip, pages, flagged: flagged.filter((f) => !accepted.has(f.key)), pageNames, downloaded: true };
+    const shown = flagged.filter((f) => !accepted.has(f.key));
+    const byPage = new Map();
+    for (const f of shown) {
+      for (const o of f.occurrences) {
+        if (!byPage.has(o.page)) byPage.set(o.page, []);
+        byPage.get(o.page).push(o);
+      }
+    }
+    const stylesEntry = zip.entries.find((e) => /^Settings0[\\/]Styles[\\/]styles\.xml$/i.test(e.name));
+    let styles = new Map();
+    try { if (stylesEntry) styles = parseStyles(decodeXml(C.inflateEntry(stylesEntry)).xml); } catch (e) { /* preview uses plain cells */ }
+    const entriesByName = new Map(zip.entries.map((e) => [e.name.replace(/\\/g, '/').toLowerCase(), e]));
+
+    const pageOrder = pages.map((p, i) => i).sort((a, b) => pages[a].name.localeCompare(pages[b].name, 'en-GB', { numeric: true, sensitivity: 'base' }));
+
+    state = { file, zip, pages, pageOrder, flagged: shown, byPage, pageNames, styles, entriesByName, pictures: new Map(), downloaded: true };
     showReview();
   } catch (err) {
     if (id !== runId) return;
@@ -271,6 +299,14 @@ function isAccepted(f) {
   return accepted.has(f.key);
 }
 
+const isPending = (o) => o.replacement === null && state.pages[o.page].editable;
+const isOpen = (o) => o.replacement === null && !isAccepted(o.flag);
+
+/** Dealt with: accepted, or every place that can be changed has been. */
+function isDone(f) {
+  return isAccepted(f) || (f.occurrences.some((o) => o.replacement !== null) && !f.occurrences.some(isPending));
+}
+
 function showReview() {
   $('review-title').textContent = state.file.name;
   const main = state.flagged.filter((f) => !f.short);
@@ -280,6 +316,11 @@ function showReview() {
   $('short-group').hidden = short.length === 0;
   $('short-title').textContent = `Short letter groups (${short.length})`;
 
+  pageView.page = state.pageOrder.find((i) => state.byPage.has(i)) ?? state.pageOrder[0] ?? 0;
+  pageView.cell = null;
+  $('page-filter').value = '';
+  $('only-flagged').checked = state.byPage.size > 0;
+  selectTab('words');
   updateSummary();
   show('step-review');
 }
@@ -297,20 +338,21 @@ function renderPageNames() {
 
 function updateSummary() {
   renderPageNames();
-  const open = state.flagged.filter((f) => f.status === 'open' && !isAccepted(f));
-  const changedCells = state.flagged.reduce((n, f) => n + f.occurrences.filter((o) => o.replacement !== null).length, 0);
+  const open = state.flagged.filter((f) => !isDone(f));
+  const changed = state.flagged.reduce((n, f) => n + f.occurrences.filter((o) => o.replacement !== null).length, 0);
   $('review-summary').textContent = state.flagged.length === 0
     ? 'No spelling mistakes found.'
     : open.length === 0
       ? 'All flagged words have been dealt with.'
       : `${plural(open.length, 'word')} to check.`;
-  $('download-button').hidden = changedCells === 0;
-  $('review-changes').hidden = changedCells === 0;
-  $('review-changes').textContent = `${plural(changedCells, 'correction')} ready. Nothing changes until you download.`;
+  $('tab-words').textContent = `Words (${open.length})`;
+  $('download-button').hidden = changed === 0;
+  $('review-changes').hidden = changed === 0;
+  $('review-changes').textContent = `${plural(changed, 'correction')} ready. Nothing changes until you download.`;
 }
 
 function hasUnsavedChanges() {
-  return state && !state.downloaded;
+  return state && !state.downloaded && state.flagged.some((f) => f.occurrences.some((o) => o.replacement !== null));
 }
 
 function contextFor(o) {
@@ -327,7 +369,9 @@ function contextFor(o) {
 function describe(f) {
   const pages = new Set(f.occurrences.map((o) => o.page)).size;
   const kinds = [...new Set(f.occurrences.map((o) => KINDS[state.pages[o.page].fields[o.field].kind]))];
-  return `${plural(f.occurrences.length, 'time')} on ${plural(pages, 'page')} · ${kinds.join(', ')}`;
+  const changed = f.occurrences.filter((o) => o.replacement !== null).length;
+  return `${plural(f.occurrences.length, 'time')} on ${plural(pages, 'page')} · ${kinds.join(', ')}` +
+    (changed ? ` · ${changed} already changed` : '');
 }
 
 /** Keeps a capital letter or capitals when the user picks a lower-case word. */
@@ -348,45 +392,58 @@ function renderRow(f) {
   return row;
 }
 
+function correctionForm(label, onChange) {
+  const input = el('input', { type: 'text', class: 'fix-input', 'aria-label': label, placeholder: 'Type a correction', spellcheck: 'false', autocomplete: 'off' });
+  return el('form', { class: 'fix-form', onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (v) onChange(v); } },
+    input, el('button', { class: 'button button-secondary button-small', type: 'submit' }, 'Change'));
+}
+
+function acceptButton(f) {
+  return el('button', { class: 'button button-accept button-small', type: 'button', onclick: () => { accepted.set(f.key, f.word); saveAccepted(); changed(f); } }, 'Accept');
+}
+
 function drawRow(f) {
   const row = f.row;
-  row.classList.toggle('is-done', f.status !== 'open' || isAccepted(f));
+  row.classList.toggle('is-done', isDone(f));
 
   if (isAccepted(f)) {
     row.replaceChildren(el('p', { class: 'row-done' },
       el('span', { class: 'flag-word' }, f.word), ' is accepted. ',
-      el('button', { class: 'link-button', type: 'button', onclick: () => { accepted.delete(f.key); saveAccepted(); drawRow(f); updateSummary(); } }, 'Undo'),
+      el('button', { class: 'link-button', type: 'button', onclick: () => { accepted.delete(f.key); saveAccepted(); changed(f); } }, 'Undo'),
     ));
     return;
   }
-  if (f.status === 'changed') {
-    const n = f.occurrences.filter((o) => o.replacement !== null).length;
+  if (isDone(f)) {
+    const done = f.occurrences.filter((o) => o.replacement !== null);
+    const all = new Set(done.map((o) => o.replacement));
     row.replaceChildren(el('p', { class: 'row-done' },
-      el('span', { class: 'flag-word' }, f.word), ' → ', el('strong', {}, f.replacement), ` in ${plural(n, 'place')}. `,
+      el('span', { class: 'flag-word' }, f.word), ' → ',
+      all.size === 1 ? el('strong', {}, done[0].replacement) : 'changed', ` in ${plural(done.length, 'place')}. `,
       el('button', { class: 'link-button', type: 'button', onclick: () => undoChange(f) }, 'Undo'),
     ));
     return;
   }
 
-  const editableCount = f.occurrences.filter((o) => state.pages[o.page].editable).length;
-  const input = el('input', { type: 'text', class: 'fix-input', 'aria-label': `Correction for ${f.word}`, placeholder: 'Type a correction', spellcheck: 'false', autocomplete: 'off' });
-  const typed = el('form', { class: 'fix-form', onsubmit: (e) => { e.preventDefault(); const v = input.value.trim(); if (v) applyChange(f, v, false); } },
-    input, el('button', { class: 'button button-secondary button-small', type: 'submit' }, 'Change'));
-
+  const canChange = f.occurrences.some(isPending);
   const where = el('details', { class: 'where' },
     el('summary', {}, 'Show where'),
     el('ul', { class: 'where-list' }, ...f.occurrences.slice(0, MAX_SHOWN).map((o) => {
       const page = state.pages[o.page];
       const kind = KINDS[page.fields[o.field].kind];
-      const box = el('input', { type: 'checkbox', checked: o.include && page.editable, disabled: !page.editable, onchange: (e) => { o.include = e.target.checked; } });
-      return el('li', {}, el('label', {},
+      const box = el('input', {
+        type: 'checkbox', checked: o.include && isPending(o), disabled: !isPending(o),
+        'aria-label': `Change on ${page.name}`, onchange: (e) => { o.include = e.target.checked; },
+      });
+      return el('li', {},
         box,
         el('span', { class: 'where-text' },
           el('span', { class: 'where-page' }, page.name), el('span', { class: 'chip' }, kind),
           !page.editable ? el('span', { class: 'chip chip-warn' }, "Can't be changed") : null,
+          o.replacement !== null ? el('span', { class: 'chip chip-ok' }, `Changed to ${o.replacement}`) : null,
+          el('button', { class: 'link-button', type: 'button', onclick: () => showOccurrence(o) }, 'Show on page'),
           el('span', { class: 'where-context' }, ...contextFor(o)),
         ),
-      ));
+      );
     }), f.occurrences.length > MAX_SHOWN ? el('li', { class: 'muted' }, `And ${f.occurrences.length - MAX_SHOWN} more.`) : null),
     el('p', { class: 'muted where-hint' }, 'Untick any you want to leave as they are.'),
   );
@@ -395,56 +452,306 @@ function drawRow(f) {
     el('div', { class: 'word-main' },
       el('span', { class: 'flag-word' }, f.word),
       el('span', { class: 'word-meta' }, describe(f)),
-      el('span', { class: 'word-example' }, ...contextFor(f.occurrences[0])),
+      el('span', { class: 'word-example' }, ...contextFor(f.occurrences.find(isOpen) || f.occurrences[0])),
     ),
     el('div', { class: 'word-fix' },
-      editableCount === 0 ? null : el('div', { class: 'suggestions' },
+      canChange ? el('div', { class: 'suggestions' },
         f.suggestions.length ? el('span', { class: 'muted' }, 'Change to') : null,
         ...f.suggestions.map((s) => el('button', { class: 'button button-suggestion button-small', type: 'button', onclick: () => applyChange(f, s, true) }, s)),
-      ),
-      editableCount === 0 ? null : typed,
-      el('button', { class: 'button button-accept button-small', type: 'button', onclick: () => { accepted.set(f.key, f.word); saveAccepted(); drawRow(f); updateSummary(); } }, 'Accept'),
+      ) : null,
+      canChange ? correctionForm(`Correction for ${f.word}`, (v) => applyChange(f, v, false)) : null,
+      acceptButton(f),
     ),
     where,
   );
 }
 
+/** Redraws everything that shows this word. */
+function changed(f) {
+  if (f.row) drawRow(f);
+  updateSummary();
+  if (!$('panel-pages').hidden) drawPageView();
+}
+
 function applyChange(f, replacement, fromSuggestion) {
   let n = 0;
   for (const o of f.occurrences) {
-    if (!o.include || !state.pages[o.page].editable) continue;
+    if (!o.include || !isPending(o)) continue;
     o.replacement = fromSuggestion ? matchCase(o.word, replacement) : replacement;
     n++;
   }
   if (!n) { alert('Tick at least one place to change under "Show where".'); return; }
-  f.status = 'changed';
-  f.replacement = replacement;
   state.downloaded = false;
-  drawRow(f);
-  updateSummary();
+  changed(f);
+}
+
+function changeOne(o, replacement, fromSuggestion) {
+  if (!isPending(o)) return;
+  o.replacement = fromSuggestion ? matchCase(o.word, replacement) : replacement;
+  state.downloaded = false;
+  changed(o.flag);
 }
 
 function undoChange(f) {
   for (const o of f.occurrences) o.replacement = null;
-  f.status = 'open';
-  f.replacement = null;
-  state.downloaded = state.flagged.every((x) => x.status !== 'changed');
-  drawRow(f);
-  updateSummary();
+  state.downloaded = false;
+  changed(f);
+}
+
+function undoOne(o) {
+  o.replacement = null;
+  state.downloaded = false;
+  changed(o.flag);
 }
 
 function refreshAcceptedRows() {
   if (!state) return;
   for (const f of state.flagged) if (f.row) drawRow(f);
   updateSummary();
+  if (!$('panel-pages').hidden) drawPageView();
 }
 
 function acceptShort() {
   for (const f of state.flagged) {
-    if (f.short && f.status === 'open') accepted.set(f.key, f.word);
+    if (f.short && !isDone(f)) accepted.set(f.key, f.word);
   }
   saveAccepted();
   refreshAcceptedRows();
+}
+
+/* ------------------------------------------------------------------ */
+/* Pages: each page drawn as a preview, mistakes marked                */
+/* ------------------------------------------------------------------ */
+const pageView = { page: 0, cell: null };
+
+function selectTab(name) {
+  for (const t of ['words', 'pages']) {
+    $(`tab-${t}`).setAttribute('aria-selected', String(t === name));
+    $(`tab-${t}`).tabIndex = t === name ? 0 : -1;
+    $(`panel-${t}`).hidden = t !== name;
+  }
+  $('step-review').classList.toggle('is-wide', name === 'pages');
+  if (name === 'pages') { drawPageList(); drawPageView(); }
+}
+
+/** Mistakes still to deal with on a page. */
+function openCount(pageIndex) {
+  return (state.byPage.get(pageIndex) || []).filter(isOpen).length;
+}
+
+function drawPageList() {
+  const filter = $('page-filter').value.trim().toLowerCase();
+  const only = $('only-flagged').checked;
+  const items = [];
+  state.pageOrder.forEach((i) => {
+    const p = state.pages[i];
+    const n = openCount(i);
+    if (only && !n && i !== pageView.page) return;
+    if (filter && !p.name.toLowerCase().includes(filter)) return;
+    items.push(el('li', {}, el('button', {
+      type: 'button', class: 'page-link', 'aria-current': i === pageView.page ? 'true' : false,
+      onclick: () => openPage(i),
+    }, el('span', { class: 'page-link-name' }, p.name), n ? el('span', { class: 'count' }, String(n)) : null)));
+  });
+  $('page-list').replaceChildren(...(items.length ? items : [el('li', { class: 'muted' }, 'No pages match.')]));
+}
+
+function openPage(i, cell = null) {
+  pageView.page = i;
+  pageView.cell = cell;
+  drawPageList();
+  drawPageView();
+}
+
+function showOccurrence(o) {
+  selectTab('pages');
+  openPage(o.page, fieldCell(o.page, o.field));
+  $('page-title').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+/** The page's layout, read once and kept. */
+function modelFor(i) {
+  const page = state.pages[i];
+  if (!page.model) {
+    try {
+      page.model = parseGrid(page.xml);
+    } catch (e) {
+      page.model = null;
+    }
+    // Word list items with no cell of their own are shown in word list cells, in order.
+    const cells = page.model ? wordListCells(page.model) : [];
+    let k = 0;
+    page.fieldCells = page.fields.map((f) => f.cell ? f.cell.index : f.kind === 'wordlist' ? (cells[k++] ?? null) : null);
+  }
+  return page.model;
+}
+
+function fieldCell(pageIndex, fieldIndex) {
+  modelFor(pageIndex);
+  return state.pages[pageIndex].fieldCells[fieldIndex];
+}
+
+/** A field's text with corrections applied, and the words to mark. */
+function displayText(pageIndex, fieldIndex) {
+  const field = state.pages[pageIndex].fields[fieldIndex];
+  const occs = (state.byPage.get(pageIndex) || []).filter((o) => o.field === fieldIndex).sort((a, b) => a.start - b.start);
+  let text = '';
+  let last = 0;
+  const marks = [];
+  for (const o of occs) {
+    text += field.text.slice(last, o.start);
+    const shown = o.replacement ?? o.word;
+    if (o.replacement !== null) marks.push({ start: text.length, end: text.length + shown.length, cls: 'fixed' });
+    else if (!isAccepted(o.flag)) marks.push({ start: text.length, end: text.length + shown.length, cls: 'misspelt' });
+    text += shown;
+    last = o.end;
+  }
+  text += field.text.slice(last);
+  return { text, marks };
+}
+
+function pictureUrl(pageName, fileName) {
+  const name = `grids/${pageName}/${fileName}`.toLowerCase();
+  if (state.pictures.has(name)) return state.pictures.get(name);
+  let url = null;
+  const entry = state.entriesByName.get(name);
+  if (entry && !/\.(wmf|emf)$/i.test(fileName)) {
+    try {
+      const bytes = C.inflateEntry(entry);
+      const type = { png: 'image/png', jpeg: 'image/jpeg' }[C.sniff(bytes)] || '';
+      url = URL.createObjectURL(new Blob([bytes], type ? { type } : {}));
+    } catch (e) { /* damaged picture: show the placeholder */ }
+  }
+  state.pictures.set(name, url);
+  return url;
+}
+
+function drawPageView() {
+  const i = pageView.page;
+  const page = state.pages[i];
+  const model = modelFor(i);
+  $('page-title').textContent = page.name;
+  const n = openCount(i);
+  $('page-status').textContent = n ? `${plural(n, 'word')} to check on this page.` : 'Nothing to check on this page.';
+
+  if (!model) {
+    $('page-preview').replaceChildren(el('p', { class: 'muted' }, "This page can't be shown."));
+  } else {
+    const text = new Map();
+    const flags = new Map();
+    page.fields.forEach((f, fi) => {
+      const cell = page.fieldCells[fi];
+      if (cell === null) return;
+      if (f.kind === 'caption' || f.kind === 'wordlist') text.set(cell, displayText(i, fi));
+    });
+    for (const o of state.byPage.get(i) || []) {
+      const cell = page.fieldCells[o.field];
+      if (cell === null || !isOpen(o)) continue;
+      const fl = flags.get(cell) || { count: 0, label: '' };
+      fl.count++;
+      fl.label = `${plural(fl.count, 'word')} to check`;
+      flags.set(cell, fl);
+    }
+    const frame = renderPage({
+      model, styles: state.styles, text, flags, selected: pageView.cell,
+      picture: (name) => pictureUrl(page.name, name),
+      onSelect: (cell) => {
+        pageView.cell = cell;
+        drawPageView();
+        $('cell-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      },
+    });
+    $('page-preview').replaceChildren(frame);
+    requestAnimationFrame(() => fitCaptions(frame));
+  }
+  drawCellPanel();
+}
+
+/** One flagged word in the cell panel, with its own fix buttons. */
+function occurrenceControls(o) {
+  const f = o.flag;
+  if (isAccepted(f)) {
+    return el('p', { class: 'occ occ-done' }, el('span', { class: 'occ-word' }, f.word), ' is accepted.');
+  }
+  if (o.replacement !== null) {
+    return el('p', { class: 'occ occ-done' },
+      el('span', { class: 'occ-word' }, o.word), ' → ', el('strong', {}, o.replacement), '. ',
+      el('button', { class: 'link-button', type: 'button', onclick: () => undoOne(o) }, 'Undo'));
+  }
+  const others = f.occurrences.filter((x) => x !== o && isPending(x)).length;
+  return el('div', { class: 'occ' },
+    el('div', { class: 'occ-head' },
+      el('span', { class: 'flag-word occ-word' }, o.word),
+      others ? el('button', { class: 'link-button', type: 'button', onclick: () => showWord(f) }, `Change all ${others + 1} places`) : null),
+    isPending(o) ? el('div', { class: 'suggestions' },
+      f.suggestions.length ? el('span', { class: 'muted' }, 'Change here to') : null,
+      ...f.suggestions.map((s) => el('button', { class: 'button button-suggestion button-small', type: 'button', onclick: () => changeOne(o, s, true) }, s)),
+    ) : el('p', { class: 'muted' }, "This page can't be changed."),
+    el('div', { class: 'word-fix' },
+      isPending(o) ? correctionForm(`Correction for ${o.word} here`, (v) => changeOne(o, v, false)) : null,
+      acceptButton(f)),
+  );
+}
+
+function fieldBlock(pageIndex, fieldIndex, occs) {
+  const field = state.pages[pageIndex].fields[fieldIndex];
+  const { text, marks } = displayText(pageIndex, fieldIndex);
+  return el('div', { class: 'field' },
+    el('span', { class: 'chip' }, KINDS[field.kind]),
+    el('p', { class: 'field-text' }, ...markText(text, marks)),
+    ...occs.map(occurrenceControls),
+  );
+}
+
+function markText(text, marks) {
+  const out = [];
+  let last = 0;
+  for (const m of marks) {
+    out.push(text.slice(last, m.start), el('mark', { class: m.cls }, text.slice(m.start, m.end)));
+    last = m.end;
+  }
+  out.push(text.slice(last));
+  return out;
+}
+
+function drawCellPanel() {
+  const i = pageView.page;
+  const page = state.pages[i];
+  const occs = state.byPage.get(i) || [];
+  const panel = $('cell-panel');
+  const blocks = (pred) => page.fields.map((f, fi) => [f, fi]).filter(([, fi]) => pred(page.fieldCells[fi]))
+    .map(([, fi]) => fieldBlock(i, fi, occs.filter((o) => o.field === fi)));
+
+  // Mistakes in text with no cell on screen, such as word list items beyond the last word list cell.
+  const loose = page.fields.map((f, fi) => fi).filter((fi) => page.fieldCells[fi] === null && occs.some((o) => o.field === fi));
+  $('page-extra').replaceChildren(...(loose.length ? [
+    el('h5', { class: 'panel-title' }, 'Also on this page'),
+    el('p', { class: 'muted' }, 'Text that has no cell of its own in the preview.'),
+    ...loose.map((fi) => fieldBlock(i, fi, occs.filter((o) => o.field === fi))),
+  ] : []));
+
+  if (pageView.cell === null || !page.model) {
+    panel.replaceChildren(el('p', { class: 'muted' }, page.model ? 'Select a cell to see its text. Cells with a number have words to check.' : ''));
+    return;
+  }
+  const cell = page.model.cells[pageView.cell];
+  const target = cell.jump && state.pages.findIndex((p) => p.name === cell.jump);
+  const fields = blocks((c) => c === pageView.cell);
+  panel.replaceChildren(...[
+    el('h5', { class: 'panel-title' }, `Cell in row ${cell.y + 1}, column ${cell.x + 1}`),
+    cell.jump ? el('p', { class: 'jump' }, 'Opens the page ', el('strong', {}, cell.jump), ' ',
+      target >= 0 ? el('button', { class: 'link-button', type: 'button', onclick: () => openPage(target) }, 'Go to this page') : el('span', { class: 'chip chip-warn' }, 'Page not found')) : null,
+    ...(fields.length ? fields : [el('p', { class: 'muted' }, 'This cell has no text to check.')]),
+  ].filter(Boolean));
+}
+
+function showWord(f) {
+  selectTab('words');
+  if (f.short) $('short-group').open = true;
+  f.row.querySelector('details.where')?.setAttribute('open', '');
+  f.row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  f.row.classList.add('is-flash');
+  setTimeout(() => f.row.classList.remove('is-flash'), 1600);
 }
 
 /* ------------------------------------------------------------------ */
@@ -487,7 +794,7 @@ function download() {
 function reset() {
   if (hasUnsavedChanges() && !confirm('You have corrections you have not downloaded. Leave them?')) return;
   runId++;
-  state = null;
+  clearState();
   $('file-input').value = '';
   show('step-choose');
   $('file-input').focus();
@@ -510,13 +817,31 @@ zone.addEventListener('drop', (e) => {
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
 
-$('cancel-button').addEventListener('click', () => { runId++; state = null; show('step-choose'); });
+$('cancel-button').addEventListener('click', () => { runId++; clearState(); show('step-choose'); });
 $('again-button').addEventListener('click', reset);
 $('error-button').addEventListener('click', reset);
 $('download-button').addEventListener('click', download);
 $('accept-short').addEventListener('click', acceptShort);
 $('export-button').addEventListener('click', exportAccepted);
 $('import-input').addEventListener('change', (e) => importAccepted(e.target.files[0]));
+
+$('tab-words').addEventListener('click', () => selectTab('words'));
+$('tab-pages').addEventListener('click', () => selectTab('pages'));
+$('tabs').addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  const next = $('tab-words').getAttribute('aria-selected') === 'true' ? 'pages' : 'words';
+  selectTab(next);
+  $(`tab-${next}`).focus();
+});
+$('page-filter').addEventListener('input', drawPageList);
+$('only-flagged').addEventListener('change', drawPageList);
+
+// Captions are fitted to the preview's size, so redraw when the window changes size.
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { if (state && !$('panel-pages').hidden) drawPageView(); }, 200);
+});
 
 window.addEventListener('beforeunload', (e) => {
   if (hasUnsavedChanges()) { e.preventDefault(); e.returnValue = ''; }

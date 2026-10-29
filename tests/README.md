@@ -22,7 +22,9 @@ python3 tests/verify-spelling.py "input.gridset" corrected.gridset
 
 `spell-regressions.mjs` covers finding text (captions, written and spoken text, word
 lists, CDATA spaces, escaped characters), changing a word without touching anything
-around it, and refusing to write back files that would not round-trip exactly.
+around it, refusing to write back files that would not round-trip exactly, and the
+page preview's model (sizes, styles, pictures named after cell positions, word list
+cells, and cells numbered the same way as their text).
 
 `verify-spelling.py` uses only Python's standard library. It fails if any file other
 than a page's `grid.xml` changed, if any date changed, or if a changed page has

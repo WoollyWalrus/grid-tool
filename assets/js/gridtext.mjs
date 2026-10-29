@@ -138,9 +138,10 @@ export function extractFields(xml) {
       }
       const attrs = parseAttrs(m[3]);
       const selfClosing = m[4] === '/';
-      if (name === 'Cell' && !selfClosing) {
+      // Every cell counts, even an empty <Cell/>, so indexes match gridmodel.mjs.
+      if (name === 'Cell') {
         cellIndex++;
-        cell = { index: cellIndex, x: +(attrs.X || 0), y: +(attrs.Y || 0) };
+        if (!selfClosing) cell = { index: cellIndex, x: +(attrs.X || 0), y: +(attrs.Y || 0) };
       }
       if (name === 'Command' && !selfClosing) command = attrs.ID || null;
       // Rich text containers: a command's text parameter, or a word list item.

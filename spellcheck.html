@@ -10,10 +10,10 @@
   <meta name="description" content="Find and fix spelling mistakes in Grid 3 grid sets. Your files never leave your computer.">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/img/favicon-32.png">
   <link rel="apple-touch-icon" href="assets/img/favicon-192.png">
-  <link rel="stylesheet" href="assets/css/style.css?v=3">
+  <link rel="stylesheet" href="assets/css/style.css?v=4">
   <script src="assets/vendor/fflate.min.js" defer></script>
   <script src="assets/js/core.js?v=2" defer></script>
-  <script src="assets/js/spellcheck.js?v=1" type="module"></script>
+  <script src="assets/js/spellcheck.js?v=2" type="module"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -79,6 +79,28 @@
         </div>
         <p id="review-changes" class="changes-note" aria-live="polite" hidden></p>
 
+        <div id="tabs" class="tabs" role="tablist" aria-label="Ways to review">
+          <button id="tab-words" class="tab" type="button" role="tab" aria-controls="panel-words" aria-selected="true">Words</button>
+          <button id="tab-pages" class="tab" type="button" role="tab" aria-controls="panel-pages" aria-selected="false" tabindex="-1">Pages</button>
+        </div>
+
+        <div id="panel-pages" class="pages-panel" role="tabpanel" aria-labelledby="tab-pages" hidden>
+          <aside class="page-nav" aria-label="Pages">
+            <input id="page-filter" class="fix-input page-filter" type="search" placeholder="Find a page" aria-label="Find a page" autocomplete="off">
+            <label class="only-flagged"><input id="only-flagged" type="checkbox" checked> Only pages with words to check</label>
+            <ul id="page-list" class="page-list"></ul>
+          </aside>
+          <div class="page-view">
+            <h4 id="page-title" class="page-title"></h4>
+            <p id="page-status" class="muted page-status"></p>
+            <div id="page-preview" class="page-preview"></div>
+            <p class="muted preview-note">This is a preview, so it won't look exactly like Grid 3. Symbols from Grid 3's own libraries show as <span class="gp-symbol gp-symbol-inline" aria-hidden="true"></span> and fonts may be different.</p>
+            <div id="cell-panel" class="cell-panel" aria-live="polite"></div>
+            <div id="page-extra" class="cell-panel"></div>
+          </div>
+        </div>
+
+        <div id="panel-words" role="tabpanel" aria-labelledby="tab-words">
         <div id="word-list" class="word-list"></div>
 
         <details id="short-group" class="short-group" hidden>
@@ -93,6 +115,7 @@
           <p class="muted">Other pages link to pages by name, so pages can&rsquo;t be renamed here. Rename them in Grid 3, which updates the links too.</p>
           <ul id="page-names-list" class="plain-list"></ul>
         </details>
+        </div>
       </div>
 
       <!-- Problem -->

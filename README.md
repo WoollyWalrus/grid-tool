@@ -38,7 +38,15 @@ exactly as they are.
 2. Each unknown word is listed once, with how often and where it appears and an
    example of the text around it. Choose a suggestion, type a correction, or select
    **Accept**. **Show where** lists every place, and you can untick places to leave alone.
-3. Click **Download corrected grid set** and import it into Grid 3.
+3. Or switch to **Pages** to see each page drawn as a grid, with mistakes marked on
+   the cells. Select a cell to see all its text (on the cell, written, spoken…) and
+   correct one place at a time. **Show on page** in the word list jumps straight there.
+4. Click **Download corrected grid set** and import it into Grid 3.
+
+The page preview is close to Grid 3 but not identical. Symbols from Grid 3's own
+libraries (Widgit, Grid 3 symbols) aren't stored in grid sets, so they show as a
+placeholder, and `.wmf` pictures and Grid 3's fonts can't be shown in a browser. Photos
+and pictures stored in the grid set are shown.
 
 It checks the words on cells, the text cells write and speak, word lists, audio
 descriptions and tooltips, using British English. Each place is labelled with which
@@ -69,6 +77,8 @@ Then open <http://localhost:8000>.
 - **Colours and fonts:** `assets/css/style.css`.
 - **Quality limits:** `QUALITY` at the top of `assets/js/shrink.mjs`.
 - **Words the spell checker always allows:** `BUILT_IN_WORDS` in `assets/js/spell.mjs`.
+- **Preview column and row sizes:** `SIZES` at the top of `assets/js/gridmodel.mjs`.
+  Grid 3 doesn't document them, so compare with a screenshot of the same page in Grid 3.
 
 Changes go in through a pull request to `main`. Once merged, GitHub Pages updates
 the live site automatically within a minute or two. There is no build step.
@@ -130,6 +140,8 @@ can safely contain JPEG data. Grid already does this itself.
 | `spellcheck.html`, `assets/js/spellcheck.js` | The spell checker page |
 | `assets/js/gridtext.mjs` | Finding the words in each page and changing them in place |
 | `assets/js/spell.mjs`, `assets/js/spell-worker.mjs` | Dictionary checks, run in the background |
+| `assets/js/gridmodel.mjs` | Reading a page's layout, styles and pictures for the preview |
+| `assets/js/gridview.js` | Drawing a page preview with mistakes marked |
 | `assets/vendor/` | Third-party libraries, stored locally |
 | `tests/` | Test and checking scripts |
 

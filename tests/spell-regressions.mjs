@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { extractFields, words, fieldEdits, applyEdits, decodeXml, encodeXml, gridName } from '../assets/js/gridtext.mjs';
 import { createChecker, normalise } from '../assets/js/spell.mjs';
+import { parseGrid, parseStyles, resolveStyle, cssColour, pictureSource, wordListCells, SIZES } from '../assets/js/gridmodel.mjs';
 
 const xml = `<?xml version="1.0" encoding="utf-8"?>
 <Grid xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -116,5 +117,60 @@ for (const w of ['colour', 'Thousandths', 'vertices', 'gridset', "don't", 'donâ€
 for (const w of ['color', 'addidtion', 'Verices']) assert.ok(!checker.isCorrect(w), w);
 assert.ok(checker.suggest('addidtion').includes('addition'));
 assert.equal(normalise('Donâ€™t'), "don't");
+
+/* Page model for the preview */
+const page = `<Grid>
+  <ColumnDefinitions><ColumnDefinition /><ColumnDefinition Width="ExtraSmall" /><ColumnDefinition Width="Large" /></ColumnDefinitions>
+  <RowDefinitions><RowDefinition /><RowDefinition Height="Small" /></RowDefinitions>
+  <Cells>
+    <Cell X="1" ColumnSpan="2">
+      <Content>
+        <Commands><Command ID="Jump.To"><Parameter Key="grid">Food &amp; Drink</Parameter></Command></Commands>
+        <CaptionAndImage><Caption>Food &amp; drnk</Caption><Image>.png</Image></CaptionAndImage>
+        <Style><BasedOnStyle>style 2</BasedOnStyle><FontSize>30</FontSize></Style>
+      </Content>
+    </Cell>
+    <Cell X="5" Y="9" />
+    <Cell Y="1"><Content><ContentType>AutoContent</ContentType><ContentSubType>WordList</ContentSubType><Style><BasedOnStyle>Missing</BasedOnStyle></Style></Content><Visibility>Hidden</Visibility></Cell>
+    <Cell><Content><ContentType>AutoContent</ContentType><ContentSubType>WordList</ContentSubType><CaptionAndImage><Image>[widgit]a\\b.emf</Image></CaptionAndImage></Content></Cell>
+    <Cell X="2" Y="1"><Content><CaptionAndImage><Caption>Teh end</Caption><Image>-0.png</Image></CaptionAndImage></Content></Cell>
+  </Cells>
+  <WordList><Items>
+    <WordListItem><Text><p><s><r>one</r></s><s><r><![CDATA[ ]]></r></s><s><r>to</r></s></p></Text></WordListItem>
+    <WordListItem><Text><r>three</r></Text></WordListItem>
+  </Items></WordList>
+  <BackgroundColour>#102030FF</BackgroundColour>
+</Grid>`;
+const model = parseGrid(page);
+assert.deepEqual(model.columns, [1, SIZES.ExtraSmall, SIZES.Large]);
+assert.deepEqual(model.rows, [1, SIZES.Small]);
+assert.equal(model.background, '#102030FF');
+assert.equal(model.cells.length, 5, 'an empty <Cell/> still counts');
+const [food, , hidden, top, end] = model.cells;
+assert.deepEqual([food.x, food.y, food.w, food.h], [1, 0, 2, 1]);
+assert.equal(food.caption, 'Food & drnk');
+assert.equal(food.jump, 'Food & Drink');
+assert.equal(hidden.visibility, 'Hidden');
+assert.deepEqual(model.wordList, ['one to', 'three']);
+assert.deepEqual(wordListCells(model), [top.index, hidden.index], 'word list cells fill along rows, top to bottom');
+assert.deepEqual(pictureSource(food), { kind: 'file', name: '1-0.png' }, 'a cell\'s own picture is named after its position');
+assert.deepEqual(pictureSource(end), { kind: 'file', name: '2-1-0.png' });
+assert.deepEqual(pictureSource(top), { kind: 'library', library: 'widgit', name: 'a\\b.emf' });
+assert.equal(pictureSource(hidden), null);
+// Cells are numbered the same way as the text, so mistakes land on the right cell.
+for (const f of extractFields(page)) if (f.cell) assert.deepEqual([model.cells[f.cell.index].x, model.cells[f.cell.index].y], [f.cell.x, f.cell.y]);
+assert.equal(extractFields(page).find((f) => f.text === 'Teh end').cell.index, end.index);
+
+const styles = parseStyles(`<StyleData><Styles>
+  <Style Key="Default"><BackColour>#FFFFFFFF</BackColour><FontSize>20</FontSize></Style>
+  <Style Key="style 2"><BackColour>#F7DA64FF</BackColour><FontSize>66</FontSize><BackgroundShape>3</BackgroundShape></Style>
+</Styles></StyleData>`);
+const look = resolveStyle(food.style, styles);
+assert.equal(look.back, '#F7DA64FF');
+assert.equal(look.fontSize, 30, 'a size set on the cell wins over its style');
+assert.equal(look.shape, 3);
+assert.equal(resolveStyle(hidden.style, styles).fontSize, 20, 'an unknown style falls back to Default');
+assert.equal(cssColour('#F7DA6480'), 'rgba(247, 218, 100, 0.502)');
+assert.equal(cssColour('red'), null);
 
 console.log('Spell checker checks passed.');
