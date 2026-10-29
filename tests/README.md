@@ -12,6 +12,22 @@ node tests/regressions.mjs
 These cover ZIP bounds and round trips, protected PNG metadata, cancellation during
 file reading, worker startup failures, real codec loading, and repeat shrinking.
 
+## Spell checker
+
+```sh
+node tests/spell-regressions.mjs                      # synthetic checks
+node tests/spell-node.mjs "input.gridset" --suggest   # list flagged words
+python3 tests/verify-spelling.py "input.gridset" corrected.gridset
+```
+
+`spell-regressions.mjs` covers finding text (captions, written and spoken text, word
+lists, CDATA spaces, escaped characters), changing a word without touching anything
+around it, and refusing to write back files that would not round-trip exactly.
+
+`verify-spelling.py` uses only Python's standard library. It fails if any file other
+than a page's `grid.xml` changed, if any date changed, or if a changed page has
+different elements or attributes. It then lists every text change, old → new.
+
 ## 1. Shrink a grid set outside the browser
 
 ```sh

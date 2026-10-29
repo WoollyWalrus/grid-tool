@@ -1,7 +1,14 @@
-# Grid set Shrinker
+# Grid set tools
 
-A web page that makes Grid 3 grid sets smaller by shrinking the pictures inside them,
-so large grid sets stop lagging on devices.
+Two web pages for Grid 3 grid sets. Both run entirely in your web browser: nothing is
+uploaded.
+
+- **Grid set Shrinker** (`index.html`) makes grid sets smaller by shrinking the
+  pictures inside them, so large grid sets stop lagging on devices.
+- **Grid set Spell Checker** (`spellcheck.html`) finds spelling mistakes and lets you
+  correct them. See [Spell Checker](#spell-checker) below.
+
+## Grid set Shrinker
 
 - **Only pictures change.** Grids, text, symbols, sounds and settings are copied
   across exactly as they were.
@@ -25,6 +32,26 @@ It's safe to shrink a grid set more than once, or one built from pages of grid s
 that were already shrunk. Pictures that have been shrunk before are always left
 exactly as they are.
 
+## Spell Checker
+
+1. Export the grid set from Grid 3 and drag it onto the **Check spelling** page.
+2. Each unknown word is listed once, with how often and where it appears and an
+   example of the text around it. Choose a suggestion, type a correction, or select
+   **Accept**. **Show where** lists every place, and you can untick places to leave alone.
+3. Click **Download corrected grid set** and import it into Grid 3.
+
+It checks the words on cells, the text cells write and speak, word lists, audio
+descriptions and tooltips, using British English. Each place is labelled with which
+kind of text it is. Page names are checked too, but only reported, because other pages
+link to them by name. Rename those in Grid 3.
+
+Accepted words are saved in that web browser. **Export list** and **Import list** move
+them between computers or colleagues as a plain text file, one word per line. Words
+that every CandLE grid uses can be added for everyone in `BUILT_IN_WORDS` at the top
+of `assets/js/spell.mjs`.
+
+Only the corrected words change: the rest of the file stays byte for byte the same.
+
 ## Running it on your own computer
 
 The page needs a small local web server; opening `index.html` directly won't work.
@@ -41,6 +68,7 @@ Then open <http://localhost:8000>.
   in `assets/img/`.
 - **Colours and fonts:** `assets/css/style.css`.
 - **Quality limits:** `QUALITY` at the top of `assets/js/shrink.mjs`.
+- **Words the spell checker always allows:** `BUILT_IN_WORDS` in `assets/js/spell.mjs`.
 
 Changes go in through a pull request to `main`. Once merged, GitHub Pages updates
 the live site automatically within a minute or two. There is no build step.
@@ -55,6 +83,14 @@ node tests/shrink-node.mjs original.gridset shrunk.gridset
 
 # Independently check that only pictures changed and nothing is broken
 python3 tests/verify.py original.gridset shrunk.gridset
+```
+
+```sh
+# Spell checker: synthetic checks, list the words flagged in a grid set,
+# and independently check a corrected grid set
+node tests/spell-regressions.mjs
+node tests/spell-node.mjs original.gridset --suggest
+python3 tests/verify-spelling.py original.gridset corrected.gridset
 ```
 
 More detail, and a tool for checking a grid set that has been through Grid 3, is in
@@ -91,6 +127,9 @@ can safely contain JPEG data. Grid already does this itself.
 | `assets/js/app.js` | Page logic; runs several pictures at once in the background |
 | `assets/js/shrink.mjs` | Picture shrinking and the "looks the same" check |
 | `assets/js/core.js` | Reading and writing grid sets; rejects licensed ones |
+| `spellcheck.html`, `assets/js/spellcheck.js` | The spell checker page |
+| `assets/js/gridtext.mjs` | Finding the words in each page and changing them in place |
+| `assets/js/spell.mjs`, `assets/js/spell-worker.mjs` | Dictionary checks, run in the background |
 | `assets/vendor/` | Third-party libraries, stored locally |
 | `tests/` | Test and checking scripts |
 
@@ -107,6 +146,8 @@ licence.
 | [oxipng](https://github.com/shssoichiro/oxipng), [png](https://github.com/image-rs/image-png), [MozJPEG](https://github.com/mozilla/mozjpeg) (via [jSquash](https://github.com/jamsinclair/jSquash)) | MIT / Apache-2.0 / BSD-style |
 | [ssim.js](https://github.com/obartra/ssim) 3.5.0 | MIT |
 | [fflate](https://github.com/101arrowz/fflate) 0.8.2 | MIT |
+| [nspell](https://github.com/wooorm/nspell) 2.1.5 (bundled into one file with esbuild) | MIT |
+| [dictionary-en-gb](https://github.com/wooorm/dictionaries) 2.4.0 (from [SCOWL](http://wordlist.aspell.net/)) | MIT and BSD |
 | [Fredoka](https://fonts.google.com/specimen/Fredoka) font | SIL OFL 1.1 |
 
 Each library's licence file sits next to it in `assets/vendor/`. The CandLE logo

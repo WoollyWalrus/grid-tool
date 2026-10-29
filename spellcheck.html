@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Everything runs in the browser. This policy stops the page from sending data anywhere. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; img-src 'self' data: blob:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <title>Grid set Spell Checker | CandLE</title>
+  <meta name="description" content="Find and fix spelling mistakes in Grid 3 grid sets. Your files never leave your computer.">
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/img/favicon-32.png">
+  <link rel="apple-touch-icon" href="assets/img/favicon-192.png">
+  <link rel="stylesheet" href="assets/css/style.css?v=3">
+  <script src="assets/vendor/fflate.min.js" defer></script>
+  <script src="assets/js/core.js?v=2" defer></script>
+  <script src="assets/js/spellcheck.js?v=1" type="module"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <img class="logo" src="assets/img/candle-logo-white.png" alt="CandLE" width="320" height="93">
+      <nav aria-label="Tools">
+        <a href="index.html">Shrink a grid set</a>
+        <a href="spellcheck.html" aria-current="page">Check spelling</a>
+        <a href="#how-to">How to</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="wrap">
+        <h1>Grid Set Spell Checker</h1>
+        <p class="lead">Find spelling mistakes in a grid set, on the cells and in what they write and say.<br>Fix them here and download the corrected grid set.</p>
+        <p class="privacy"><span class="privacy-icon" aria-hidden="true">🔒</span> Your grid set never leaves this computer. Nothing is uploaded.</p>
+      </div>
+    </section>
+
+    <section id="check" class="wrap tool" aria-labelledby="check-title">
+      <h2 id="check-title" class="visually-hidden">Check a grid set</h2>
+
+      <!-- Step 1: choose -->
+      <div id="step-choose" class="card">
+        <label id="drop-zone" class="drop-zone" for="file-input">
+          <input id="file-input" type="file" accept=".gridset,.gridsetx">
+          <span class="drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48" width="56" height="56"><path d="M24 6v24m0-24-9 9m9-9 9 9" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 30v8a4 4 0 0 0 4 4h24a4 4 0 0 0 4-4v-8" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"/></svg>
+          </span>
+          <span class="drop-title">Choose your exported file</span>
+          <span class="button button-primary">Select a grid set</span>
+          <span class="drop-or">Or drag the saved file here</span>
+          <span class="drop-hint">Files ending in <strong>.gridset</strong></span>
+        </label>
+      </div>
+
+      <!-- Step 2: working -->
+      <div id="step-working" class="card" hidden>
+        <h3 class="card-title">Checking <span id="working-name" class="file-name"></span></h3>
+        <p id="working-status" class="status" aria-live="polite">Getting ready…</p>
+        <div class="progress" role="progressbar" aria-labelledby="working-status" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="progress-bar" class="progress-bar"></div>
+        </div>
+        <button id="cancel-button" class="button button-secondary" type="button">Cancel</button>
+      </div>
+
+      <!-- Step 3: review -->
+      <div id="step-review" class="card review" hidden>
+        <div class="review-head">
+          <div>
+            <h3 class="card-title" id="review-title"></h3>
+            <p id="review-summary" class="status"></p>
+          </div>
+          <div class="review-actions">
+            <button id="download-button" class="button button-primary" type="button" hidden>Download corrected grid set</button>
+            <button id="again-button" class="button button-secondary" type="button">Check another grid set</button>
+          </div>
+        </div>
+        <p id="review-changes" class="changes-note" aria-live="polite" hidden></p>
+
+        <div id="word-list" class="word-list"></div>
+
+        <details id="short-group" class="short-group" hidden>
+          <summary><span id="short-title"></span></summary>
+          <p class="muted">These are often sounds or letter groups used in phonics, such as <em>sk</em> or <em>nch</em>, rather than mistakes.</p>
+          <button id="accept-short" class="button button-secondary button-small" type="button">Accept all of these</button>
+          <div id="short-list" class="word-list"></div>
+        </details>
+
+        <details id="page-names" class="short-group" hidden>
+          <summary><span id="page-names-title"></span></summary>
+          <p class="muted">Other pages link to pages by name, so pages can&rsquo;t be renamed here. Rename them in Grid 3, which updates the links too.</p>
+          <ul id="page-names-list" class="plain-list"></ul>
+        </details>
+      </div>
+
+      <!-- Problem -->
+      <div id="step-error" class="card card-error" hidden role="alert">
+        <h3 class="card-title" id="error-title">We couldn't check this file</h3>
+        <p id="error-message"></p>
+        <button id="error-button" class="button button-primary" type="button">Try another file</button>
+      </div>
+
+      <!-- Accepted words, kept in this browser -->
+      <details id="accepted" class="card accepted">
+        <summary>Your accepted words (<span id="accepted-count">0</span>)</summary>
+        <p class="muted">Words you accept are never flagged again on this computer. Export the list to share it with colleagues, who can import it.</p>
+        <ul id="accepted-list" class="accepted-list"></ul>
+        <div class="accepted-actions">
+          <button id="export-button" class="button button-secondary button-small" type="button">Export list</button>
+          <label class="button button-secondary button-small" for="import-input">Import list<input id="import-input" type="file" accept=".txt,text/plain"></label>
+        </div>
+      </details>
+
+      <noscript><p class="card card-error">This tool needs JavaScript turned on.</p></noscript>
+    </section>
+
+    <!--
+      ===================================================================
+      HOW TO — edit this section freely.
+      ===================================================================
+    -->
+    <section id="how-to" class="how-to" aria-labelledby="how-to-title">
+      <div class="wrap">
+        <h2 id="how-to-title">How to</h2>
+        <p class="how-to-intro">From Grid 3 to a corrected grid set in three steps.</p>
+
+        <ol class="steps" role="list">
+          <li>
+            <span class="step-number" aria-hidden="true">1</span>
+            <h3>Export your grid set from Grid 3</h3>
+            <p>In <strong>Grid Explorer</strong>, select the <strong>three-line menu</strong>, then <strong>Share grid sets</strong> and <strong>Grid set file</strong>. Save the <strong>.gridset</strong> file somewhere easy to find.</p>
+          </li>
+          <li>
+            <span class="step-number" aria-hidden="true">2</span>
+            <h3>Check it here</h3>
+            <p>Drag your file into the box above. For each word that is flagged, choose a correction, or select <strong>Accept</strong> if it is spelt correctly. Then select <strong>Download corrected grid set</strong>.</p>
+          </li>
+          <li>
+            <span class="step-number" aria-hidden="true">3</span>
+            <h3>Import it into Grid 3</h3>
+            <p>In <strong>Grid Explorer</strong>, select the <strong>three-line menu</strong>, then <strong>Add grid set</strong>. Keep your original file as a backup.</p>
+          </li>
+        </ol>
+
+        <h3 class="faq-title">Questions</h3>
+        <div class="faq">
+          <details>
+            <summary>What does it check?</summary>
+            <p>The words shown on cells, the text cells write and speak, word lists, audio descriptions and tooltips. Each is labelled, so you can tell a mistake on a cell from one in what it says.</p>
+          </details>
+          <details>
+            <summary>What does it change?</summary>
+            <p>Only the words you choose to correct. Pictures, sounds, cell commands, styles and settings are untouched.</p>
+          </details>
+          <details>
+            <summary>Which spelling does it use?</summary>
+            <p>British English, such as <em>colour</em> and <em>organise</em>.</p>
+          </details>
+          <details>
+            <summary>Where are my accepted words kept?</summary>
+            <p>In this web browser, on this computer. Use <strong>Export list</strong> to save them as a file you can share or import on another computer.</p>
+          </details>
+          <details>
+            <summary>Is my grid set uploaded anywhere?</summary>
+            <p>No. All the work happens on your computer. The grid set is never sent over the internet.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap">
+      <p>Any questions, contact Alice directly via Teams</p>
+    </div>
+  </footer>
+</body>
+</html>
