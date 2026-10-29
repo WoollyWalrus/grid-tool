@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { extractFields, words, fieldEdits, applyEdits, decodeXml, encodeXml, gridName } from '../assets/js/gridtext.mjs';
-import { createChecker, normalise } from '../assets/js/spell.mjs';
+import { createChecker, normalise, rankSuggestions, isBritishSpelling, editDistance } from '../assets/js/spell.mjs';
 import { parseGrid, parseStyles, resolveStyle, cssColour, pictureSource, wordListCells, SIZES } from '../assets/js/gridmodel.mjs';
 
 const xml = `<?xml version="1.0" encoding="utf-8"?>
@@ -112,11 +112,31 @@ assert.equal(gridName('Grids/Home/picture.png'), null);
 
 /* Dictionary */
 const dir = new URL('../assets/vendor/dictionary-en-gb/', import.meta.url);
-const checker = createChecker(readFileSync(new URL('en-gb.aff', dir)), readFileSync(new URL('en-gb.dic', dir)));
-for (const w of ['colour', 'Thousandths', 'vertices', 'gridset', "don't", 'don’t']) assert.ok(checker.isCorrect(w), w);
-for (const w of ['color', 'addidtion', 'Verices']) assert.ok(!checker.isCorrect(w), w);
-assert.ok(checker.suggest('addidtion').includes('addition'));
+const checker = await createChecker(readFileSync(new URL('en-gb.aff', dir)), readFileSync(new URL('en-gb.dic', dir)));
+for (const w of ['colour', 'Thousandths', 'vertices', 'gridset', "don't", 'don’t', 'rainforest', 'Rainforest', 'grandad', 'unamused']) assert.ok(checker.isCorrect(w), w);
+for (const w of ['color', 'addidtion', 'Verices', 'mold', 'coordinationing', 'christmas']) assert.ok(!checker.isCorrect(w), w);
+assert.equal(checker.suggest('mold')[0], 'mould', 'the British spelling comes first');
+assert.equal(checker.suggest('motorized')[0], 'motorised');
+assert.equal(checker.suggest('christmas')[0], 'Christmas', 'a missing capital comes first');
+assert.ok(checker.suggest('coordinationing').includes('coordinating'), 'words more than one letter out still get suggestions');
+assert.equal(checker.suggest('addidtion')[0], 'addition');
+assert.equal(checker.suggest('Verices')[0], 'Vertices');
+assert.equal(checker.suggest('Delet')[0], 'Delete', 'ordinary words come before names such as Delft');
+assert.ok(checker.suggest("dont").every((s) => !s.includes('’')), 'straight apostrophes stay straight');
 assert.equal(normalise('Don’t'), "don't");
+assert.ok(!checker.suggest('Prev').includes('Perv') && !checker.suggest('Nijah').includes('Niggard'), 'unsuitable words are never suggested');
+
+/* Ordering suggestions */
+for (const [us, uk] of [['mold', 'mould'], ['color', 'colour'], ['organize', 'organise'], ['analyze', 'analyse'], ['center', 'centre'],
+  ['traveled', 'travelled'], ['defense', 'defence'], ['catalog', 'catalogue'], ['anemia', 'anaemia'], ['fetus', 'foetus']]) {
+  assert.ok(isBritishSpelling(us, uk), `${us} → ${uk}`);
+}
+for (const [w, c] of [['fom', 'foam'], ['mold', 'Mold'], ['mold', 'mild'], ['cot', 'coat'], ['hop', 'hope']]) assert.ok(!isBritishSpelling(w, c), `${w} ↛ ${c}`);
+assert.deepEqual(rankSuggestions('mold', ['mild', 'Mold', 'mould', 'Moldova']), ['mould', 'Mold', 'mild', 'Moldova']);
+assert.equal(editDistance('Delet', 'Delete'), 1);
+assert.equal(editDistance('veiwer', 'viewer'), 1, 'swapped letters count once');
+assert.deepEqual(rankSuggestions('spikey', ['spike', 'spiky', 'spike y']), ['spike', 'spiky']);
+assert.deepEqual(rankSuggestions("cant", ['can’t', 'cat']), ["can't", 'cat']);
 
 /* Page model for the preview */
 const page = `<Grid>

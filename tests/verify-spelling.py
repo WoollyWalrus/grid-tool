@@ -13,7 +13,6 @@ involved. It fails if:
 
 It then lists every changed piece of text, old -> new, for a human to read.
 """
-import difflib
 import re
 import sys
 import zipfile
@@ -61,14 +60,18 @@ def main(a, b):
             fail(f'{x.filename} no longer parses: {e}')
         if shape(ta) != shape(tb):
             fail(f'{x.filename}: elements or attributes changed, not just text')
-        # Outside the changed text, the bytes must be identical.
-        sm = difflib.SequenceMatcher(None, da, db, autojunk=False)
         print(f'\n{x.filename}')
         for (pa, va), (_, vb) in zip(texts(ta), texts(tb)):
             if va != vb:
                 print(f'  {pa.split("/")[-1]}: {va.strip()!r} -> {vb.strip()!r}')
-        unchanged = sum(m.size for m in sm.get_matching_blocks())
-        print(f'  {max(len(da), len(db)) - unchanged} bytes differ, {unchanged} identical')
+        # How much of the file is untouched before the first change and after the last.
+        start = 0
+        while start < min(len(da), len(db)) and da[start] == db[start]:
+            start += 1
+        end = 0
+        while end < min(len(da), len(db)) - start and da[-1 - end] == db[-1 - end]:
+            end += 1
+        print(f'  changes between bytes {start} and {len(da) - end}; the {start + end} bytes around them are identical')
         changed += 1
 
     print(f'\nOK: {changed} pages changed, only their text. Everything else is identical.')

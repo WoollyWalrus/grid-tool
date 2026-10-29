@@ -17,7 +17,7 @@ if (!file) {
 }
 const dir = new URL('../assets/vendor/dictionary-en-gb/', import.meta.url);
 let t = Date.now();
-const checker = createChecker(readFileSync(new URL('en-gb.aff', dir)), readFileSync(new URL('en-gb.dic', dir)));
+const checker = await createChecker(readFileSync(new URL('en-gb.aff', dir)), readFileSync(new URL('en-gb.dic', dir)));
 console.error(`Dictionary loaded in ${Date.now() - t} ms`);
 
 t = Date.now();

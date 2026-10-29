@@ -157,7 +157,7 @@ function clearState() {
  * state = {
  *   file, zip,
  *   pages:   [{ name, entry, xml, editable, fields }],
- *   flagged: [{ key, word, short, suggestions, occurrences, row }],
+ *   flagged: [{ key, word, short, suggestions (null while loading), slots, occurrences, row }],
  *   byPage:  Map page index → occurrences on that page,
  *   pageNames: [{ key, word, pages }],
  *   styles, entriesByName, pictures (Map name → blob URL for previews),
@@ -245,17 +245,12 @@ async function handleFile(file) {
       const counts = new Map();
       for (const o of occurrences) counts.set(o.word, (counts.get(o.word) || 0) + 1);
       const word = [...counts].sort((a, b) => b[1] - a[1])[0][0];
-      const f = { key, word, short: [...key].length <= 3, suggestions: [], occurrences, row: null };
+      const short = [...key].length <= 3;
+      const f = { key, word, short, suggestions: short ? [] : null, slots: [], occurrences, row: null };
       for (const o of occurrences) o.flag = f;
       return f;
     });
     flagged.sort((a, b) => b.occurrences.length - a.occurrences.length || a.key.localeCompare(b.key));
-
-    setProgress(gridEntries.length * 1.5, gridEntries.length * 2, 'Finding suggestions…');
-    const toSuggest = flagged.filter((f) => !f.short);
-    const suggestions = await speller.request('suggest', toSuggest.map((f) => f.word));
-    if (id !== runId) return;
-    toSuggest.forEach((f, i) => { f.suggestions = suggestions[i]; });
 
     // Page names: reported, never changed here. Short letter groups are skipped.
     const nameWords = [...new Set(pages.flatMap((p) => words(p.name).map((w) => w.word)))].filter((w) => [...w].length > 3);
@@ -283,6 +278,7 @@ async function handleFile(file) {
 
     state = { file, zip, pages, pageOrder, flagged: shown, byPage, pageNames, styles, entriesByName, pictures: new Map(), downloaded: true };
     showReview();
+    loadSuggestions(id);
   } catch (err) {
     if (id !== runId) return;
     console.error(err);
@@ -290,6 +286,54 @@ async function handleFile(file) {
     speller = null;
     showError('Something went wrong', 'The spell checker could not run in this browser. Please try again in an up-to-date Chrome or Edge.');
   }
+}
+
+/**
+ * Suggestions take a while for some words, so the review is shown first and
+ * suggestions fill in as they arrive, from the top of the list down.
+ */
+async function loadSuggestions(id) {
+  const queue = state.flagged.filter((f) => f.suggestions === null);
+  while (queue.length) {
+    const batch = queue.splice(0, 6);
+    let result;
+    try {
+      result = await speller.request('suggest', batch.map((f) => f.word));
+    } catch (err) {
+      if (id !== runId) return;
+      console.error(err);
+      result = batch.map(() => []);
+    }
+    if (id !== runId) return;
+    batch.forEach((f, i) => { f.suggestions = result[i]; fillSlots(f); });
+  }
+}
+
+/**
+ * A place for a word's suggestion buttons. It shows "Finding suggestions…"
+ * until they arrive, then fills in without redrawing anything around it.
+ */
+function suggestionSlot(f, label, onPick) {
+  const slot = { node: el('div', { class: 'suggestions' }), label, onPick };
+  f.slots = f.slots.filter((s) => s.node.isConnected);
+  f.slots.push(slot);
+  fillSlot(f, slot);
+  return slot.node;
+}
+
+function fillSlot(f, slot) {
+  if (f.suggestions === null) {
+    slot.node.replaceChildren(el('span', { class: 'muted finding' }, 'Finding suggestions…'));
+    return;
+  }
+  slot.node.replaceChildren(
+    f.suggestions.length ? el('span', { class: 'muted' }, slot.label) : el('span', { class: 'muted' }, 'No suggestions. Type a correction or accept it.'),
+    ...f.suggestions.map((s) => el('button', { class: 'button button-suggestion button-small', type: 'button', onclick: () => slot.onPick(s) }, s)),
+  );
+}
+
+function fillSlots(f) {
+  for (const slot of f.slots) if (slot.node.isConnected) fillSlot(f, slot);
 }
 
 /* ------------------------------------------------------------------ */
@@ -316,7 +360,7 @@ function showReview() {
   $('short-group').hidden = short.length === 0;
   $('short-title').textContent = `Short letter groups (${short.length})`;
 
-  pageView.page = state.pageOrder.find((i) => state.byPage.has(i)) ?? state.pageOrder[0] ?? 0;
+  pageView.page = state.pageOrder.find((i) => openCount(i) > 0) ?? state.pageOrder[0] ?? 0;
   pageView.cell = null;
   $('page-filter').value = '';
   $('only-flagged').checked = state.byPage.size > 0;
@@ -455,10 +499,7 @@ function drawRow(f) {
       el('span', { class: 'word-example' }, ...contextFor(f.occurrences.find(isOpen) || f.occurrences[0])),
     ),
     el('div', { class: 'word-fix' },
-      canChange ? el('div', { class: 'suggestions' },
-        f.suggestions.length ? el('span', { class: 'muted' }, 'Change to') : null,
-        ...f.suggestions.map((s) => el('button', { class: 'button button-suggestion button-small', type: 'button', onclick: () => applyChange(f, s, true) }, s)),
-      ) : null,
+      canChange && !f.short ? suggestionSlot(f, 'Change to', (s) => applyChange(f, s, true)) : null,
       canChange ? correctionForm(`Correction for ${f.word}`, (v) => applyChange(f, v, false)) : null,
       acceptButton(f),
     ),
@@ -534,9 +575,32 @@ function selectTab(name) {
   if (name === 'pages') { drawPageList(); drawPageView(); }
 }
 
+/*
+ * Short letter groups (sk, ou, nch…) are usually phonics, not mistakes, so
+ * the preview leaves them out unless "Show short letter groups" is ticked.
+ * The choice is remembered in this browser.
+ */
+const SHORT_KEY = 'gridtools.spelling.showShort';
+
+function loadShowShort() {
+  try { $('show-short').checked = localStorage.getItem(SHORT_KEY) === '1'; } catch (e) { /* storage blocked */ }
+}
+
+function setShowShort(on) {
+  $('show-short').checked = on;
+  try { localStorage.setItem(SHORT_KEY, on ? '1' : '0'); } catch (e) { /* storage blocked */ }
+  if (state) { drawPageList(); drawPageView(); }
+}
+
+/** The flagged places on a page that the preview shows. */
+function pageOccurrences(pageIndex) {
+  const all = state.byPage.get(pageIndex) || [];
+  return $('show-short').checked ? all : all.filter((o) => !o.flag.short);
+}
+
 /** Mistakes still to deal with on a page. */
 function openCount(pageIndex) {
-  return (state.byPage.get(pageIndex) || []).filter(isOpen).length;
+  return pageOccurrences(pageIndex).filter(isOpen).length;
 }
 
 function drawPageList() {
@@ -564,9 +628,12 @@ function openPage(i, cell = null) {
 }
 
 function showOccurrence(o) {
+  if (o.flag.short && !$('show-short').checked) setShowShort(true);
   selectTab('pages');
-  openPage(o.page, fieldCell(o.page, o.field));
-  $('page-title').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const cell = fieldCell(o.page, o.field);
+  openPage(o.page, cell);
+  // Text with no cell of its own is listed under the preview instead.
+  (cell === null ? $('page-extra') : $('page-title')).scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 /** The page's layout, read once and kept. */
@@ -594,7 +661,7 @@ function fieldCell(pageIndex, fieldIndex) {
 /** A field's text with corrections applied, and the words to mark. */
 function displayText(pageIndex, fieldIndex) {
   const field = state.pages[pageIndex].fields[fieldIndex];
-  const occs = (state.byPage.get(pageIndex) || []).filter((o) => o.field === fieldIndex).sort((a, b) => a.start - b.start);
+  const occs = pageOccurrences(pageIndex).filter((o) => o.field === fieldIndex).sort((a, b) => a.start - b.start);
   let text = '';
   let last = 0;
   const marks = [];
@@ -644,7 +711,7 @@ function drawPageView() {
       if (cell === null) return;
       if (f.kind === 'caption' || f.kind === 'wordlist') text.set(cell, displayText(i, fi));
     });
-    for (const o of state.byPage.get(i) || []) {
+    for (const o of pageOccurrences(i)) {
       const cell = page.fieldCells[o.field];
       if (cell === null || !isOpen(o)) continue;
       const fl = flags.get(cell) || { count: 0, label: '' };
@@ -683,10 +750,8 @@ function occurrenceControls(o) {
     el('div', { class: 'occ-head' },
       el('span', { class: 'flag-word occ-word' }, o.word),
       others ? el('button', { class: 'link-button', type: 'button', onclick: () => showWord(f) }, `Change all ${others + 1} places`) : null),
-    isPending(o) ? el('div', { class: 'suggestions' },
-      f.suggestions.length ? el('span', { class: 'muted' }, 'Change here to') : null,
-      ...f.suggestions.map((s) => el('button', { class: 'button button-suggestion button-small', type: 'button', onclick: () => changeOne(o, s, true) }, s)),
-    ) : el('p', { class: 'muted' }, "This page can't be changed."),
+    !isPending(o) ? el('p', { class: 'muted' }, "This page can't be changed.")
+      : f.short ? null : suggestionSlot(f, 'Change here to', (s) => changeOne(o, s, true)),
     el('div', { class: 'word-fix' },
       isPending(o) ? correctionForm(`Correction for ${o.word} here`, (v) => changeOne(o, v, false)) : null,
       acceptButton(f)),
@@ -717,7 +782,7 @@ function markText(text, marks) {
 function drawCellPanel() {
   const i = pageView.page;
   const page = state.pages[i];
-  const occs = state.byPage.get(i) || [];
+  const occs = pageOccurrences(i);
   const panel = $('cell-panel');
   const blocks = (pred) => page.fields.map((f, fi) => [f, fi]).filter(([, fi]) => pred(page.fieldCells[fi]))
     .map(([, fi]) => fieldBlock(i, fi, occs.filter((o) => o.field === fi)));
@@ -835,6 +900,8 @@ $('tabs').addEventListener('keydown', (e) => {
 });
 $('page-filter').addEventListener('input', drawPageList);
 $('only-flagged').addEventListener('change', drawPageList);
+$('show-short').addEventListener('change', (e) => setShowShort(e.target.checked));
+loadShowShort();
 
 // Captions are fitted to the preview's size, so redraw when the window changes size.
 let resizeTimer = null;

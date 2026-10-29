@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <!-- Everything runs in the browser. This policy stops the page from sending data anywhere. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self'; connect-src 'self'; img-src 'self' data: blob:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; img-src 'self' data: blob:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
   <meta name="referrer" content="no-referrer">
   <title>Grid set Spell Checker | CandLE</title>
   <meta name="description" content="Find and fix spelling mistakes in Grid 3 grid sets. Your files never leave your computer.">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/img/favicon-32.png">
   <link rel="apple-touch-icon" href="assets/img/favicon-192.png">
-  <link rel="stylesheet" href="assets/css/style.css?v=4">
+  <link rel="stylesheet" href="assets/css/style.css?v=5">
   <script src="assets/vendor/fflate.min.js" defer></script>
   <script src="assets/js/core.js?v=2" defer></script>
-  <script src="assets/js/spellcheck.js?v=2" type="module"></script>
+  <script src="assets/js/spellcheck.js?v=4" type="module"></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -88,6 +88,7 @@
           <aside class="page-nav" aria-label="Pages">
             <input id="page-filter" class="fix-input page-filter" type="search" placeholder="Find a page" aria-label="Find a page" autocomplete="off">
             <label class="only-flagged"><input id="only-flagged" type="checkbox" checked> Only pages with words to check</label>
+            <label class="only-flagged"><input id="show-short" type="checkbox"> <span>Show short letter groups, like <em>ou</em> or <em>sk</em></span></label>
             <ul id="page-list" class="page-list"></ul>
           </aside>
           <div class="page-view">

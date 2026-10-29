@@ -11,7 +11,7 @@ async function load() {
   const [aff, dic] = await Promise.all(['en-gb.aff', 'en-gb.dic'].map(async (name) => {
     const res = await fetch(new URL(name, dir));
     if (!res.ok) throw new Error(`Could not load ${name}`);
-    return res.text();
+    return new Uint8Array(await res.arrayBuffer());
   }));
   return createChecker(aff, dic);
 }

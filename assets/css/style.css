@@ -377,3 +377,4 @@ mark.fixed { background: #d6eedf; color: inherit; border-radius: 3px; padding: 0
   .page-nav { position: static; }
   .page-list { max-height: 220px; }
 }
+.finding { font-style: italic; }

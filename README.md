@@ -41,12 +41,19 @@ exactly as they are.
 3. Or switch to **Pages** to see each page drawn as a grid, with mistakes marked on
    the cells. Select a cell to see all its text (on the cell, written, spoken…) and
    correct one place at a time. **Show on page** in the word list jumps straight there.
+   Short letter groups (three letters or fewer, such as *ou* or *sk*, usually phonics)
+   are left out of the preview unless **Show short letter groups** is ticked.
 4. Click **Download corrected grid set** and import it into Grid 3.
 
 The page preview is close to Grid 3 but not identical. Symbols from Grid 3's own
 libraries (Widgit, Grid 3 symbols) aren't stored in grid sets, so they show as a
 placeholder, and `.wmf` pictures and Grid 3's fonts can't be shown in a browser. Photos
 and pictures stored in the grid set are shown.
+
+Spelling is checked by Hunspell (the checker LibreOffice uses) with LibreOffice's
+British English dictionary. Suggestions put the British spelling of an American word
+first (*mold* → *mould*), then a missing capital (*christmas* → *Christmas*), then the
+closest words.
 
 It checks the words on cells, the text cells write and speak, word lists, audio
 descriptions and tooltips, using British English. Each place is labelled with which
@@ -77,6 +84,8 @@ Then open <http://localhost:8000>.
 - **Colours and fonts:** `assets/css/style.css`.
 - **Quality limits:** `QUALITY` at the top of `assets/js/shrink.mjs`.
 - **Words the spell checker always allows:** `BUILT_IN_WORDS` in `assets/js/spell.mjs`.
+- **Words never offered as a correction** (unsuitable for school): `NEVER_SUGGEST` in the
+  same file.
 - **Preview column and row sizes:** `SIZES` at the top of `assets/js/gridmodel.mjs`.
   Grid 3 doesn't document them, so compare with a screenshot of the same page in Grid 3.
 
@@ -158,8 +167,8 @@ licence.
 | [oxipng](https://github.com/shssoichiro/oxipng), [png](https://github.com/image-rs/image-png), [MozJPEG](https://github.com/mozilla/mozjpeg) (via [jSquash](https://github.com/jamsinclair/jSquash)) | MIT / Apache-2.0 / BSD-style |
 | [ssim.js](https://github.com/obartra/ssim) 3.5.0 | MIT |
 | [fflate](https://github.com/101arrowz/fflate) 0.8.2 | MIT |
-| [nspell](https://github.com/wooorm/nspell) 2.1.5 (bundled into one file with esbuild) | MIT |
-| [dictionary-en-gb](https://github.com/wooorm/dictionaries) 2.4.0 (from [SCOWL](http://wordlist.aspell.net/)) | MIT and BSD |
+| [Hunspell](https://github.com/hunspell/hunspell), via [hunspell-asm](https://github.com/kwonoj/hunspell-asm) 4.0.2 (see `assets/vendor/hunspell/README.md` to rebuild) | Hunspell: MPL 1.1 / GPL 2.0 / LGPL 2.1; hunspell-asm: MIT |
+| [LibreOffice British English dictionary](https://github.com/LibreOffice/dictionaries/tree/master/en) (Marco A.G. Pinto and others) | LGPL |
 | [Fredoka](https://fonts.google.com/specimen/Fredoka) font | SIL OFL 1.1 |
 
 Each library's licence file sits next to it in `assets/vendor/`. The CandLE logo
